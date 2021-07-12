@@ -1,0 +1,298 @@
+---
+title: "Evaluating impact with ITS"
+output: html_notebook
+---
+
+
+```{r setup}
+# Load libraries
+library(MASS)
+library(lubridate)
+```
+
+## Introduction
+We are going to analyze some data on pneumonia mortality from Latin America. These data were drawn from the national mortality registers that we learned about earlier and were formatted into time series in a similar method to what you did previously. 
+
+
+## Read in the time series data
+The data have already been formatted for your use. This is done using a procedure similar to what we did earlier in the semester when we were working with the data from Chile. 
+
+```{r}
+ds1<-read.csv('./time series data/monthly_mortality_10_countries.csv')
+
+#Guyana: use this one instead:
+#ds1<-read.csv('./time series data/quarterly_mortality_10_countries.csv')
+```
+
+subset the data to select which age groups we want and to remove the subnational data
+```{r }
+ds1<-ds1[grep('A',ds1$age_group, fixed=T),] #Filter to national level data
+ds1<-ds1[grep('2-59m',ds1$age_group, fixed=T),] #select age group
+unique(ds1$age_group)
+```
+
+## Select country
+```{r}
+ds1<-ds1[substr(ds1$age_group,1,2)=='ec',] #SELECT COUNTRY HERE
+```
+
+## Specify dates of vaccine introduction
+For all of these methods we need to know when the vaccine was introduced
+
+```{r}
+##CHANGE THIS DATE BASED ON YOUR COUNTRY
+vax.intro.date<-as.Date('2010-08-01') #when introduce vaccine?
+vax.eval.date<-as.Date('2011-08-01') #When start evaluation (usually at least 12 month after intro)
+
+```
+## Have a look at the data structure
+```{r}
+str(ds1)
+```
+
+```{r}
+head(ds1)
+```
+
+## Make sure R recognizes 'date' as a dat format
+
+```{r}
+ds1$date<-as.Date(ds1$monthdate, '%Y-%m-%d')
+```
+
+
+## Let's plot the time series
+```{r, fig.width=8, fig.height=3}
+par(mfrow=c(1,2))
+plot(J12_J18_prim~date, data=ds1 ,type="l",col="blue",main="J12-18, <1 yo", bty='l', ylim=c(0,max(ds1$J12_J18_prim)))
+
+plot(acm_noj_prim~date, data=ds1 ,type="l",col="blue",main="All-cause hospitalization, <1 yo", bty='l',ylim=c(0,max(ds1$acm_noj_prim)))
+```
+
+## Fitting a simple linear trend
+Here the X variable is time and the y variable is deaths due to J12-18
+```{r, fig.width=4, fig.height=4}
+plot(J12_J18_prim~date, data=ds1 ,type="p",col="blue",main="J12-18, <1 yo", bty='l', ylim=c(0,max(ds1$J12_J18_prim)))
+
+```
+We will use negative binomial regression with these data. For *count* (number of deaths per month), we use either Poisson or negative binomial regression. We could use a Poisson regression, but often the data will be "overdispersed", and as a result, confidence intervals will be incorrectly tight. You can address this by using either as negative binomial regression, or a quassipoisson model, where you model the amount of unexplained variation
+```{r}
+   mod1<-glm.nb(J12_J18_prim~date , data=ds1)
+   summary(mod1)
+```
+extract the fitted values and plot them
+```{r}
+pred1<-predict(mod1, type='response')
+plot(ds1$date, ds1$J12_J18_prim, type='p')
+points(ds1$date, pred1, type='l')
+```
+#Let's control for seasonality
+Use a monthly 'dummy' variable that allows each month to have a different average
+```{r}
+ds1$month<-as.factor(month(ds1$date)) #create as a factor variable
+ds1$month[1:36] #print first 36 observations
+```
+fit updated model
+```{r}
+mod1a<-glm.nb(J12_J18_prim~date +month, data=ds1)
+summary(mod1a)
+
+pred1a<-predict(mod1a, type='response')
+plot(ds1$date, ds1$J12_J18_prim, type='p')
+points(ds1$date, pred1a, type='l')
+```
+
+We might want to add an 'offset' variable that is used as a denominator. This could be population size; or all-non-respiratory causes of mortality 
+```{r}
+ds1$log.offset<-log(ds1$acm_noj_nodiarr_prim)
+```
+
+refit the model with an offset and look at results
+```{r}
+  mod2<-glm.nb(J12_J18_prim~date +month+ offset(log.offset) , data=ds1)
+   summary(mod2)
+pred2<-predict(mod2, type='response')
+plot(ds1$date, ds1$J12_J18_prim, type='p')
+points(ds1$date, pred2, type='l')
+
+```
+## Now lets test if the trend or level of disease changes 
+There are 3 ways we can do this. 
+1. Interrupted time series fits different line segments through the data and tests whether the slope or level of disease changes. This can sometimes result in weird jumps when fitting the model
+2. Spline model, which allows the slope to change in the post-vaccine period but forces the change to be smooth
+3. Fit the model to the pre-vaccine period only and extrapolate a trend to the post-vaccine period
+
+
+## Method 1. Interrupted time series
+First create 'dummy variables' that are 0 before introduction and 1 during the 
+```{r}
+ds1$period1<-0
+ds1$period2<-0
+
+ds1$period1[ds1$date>=vax.intro.date]<-1
+ds1$period2[ds1$date>=vax.eval.date]<-1
+
+ds1$index<-1:nrow(ds1)
+ds1[,c('date','index','period1','period2')]
+```
+
+Ok, now let's fit our ITS model and look at results 
+```{r}
+  mod3<-glm.nb(J12_J18_prim~index +month+ 
+                 period1 +period1*index +
+                 period2 +period2*index+ #change in disease during evaluation period
+                 offset(log.offset) , data=ds1)
+summary(mod3)
+```
+
+```{r}
+pred3<-predict(mod3, type='response')
+plot(ds1$date, ds1$J12_J18_prim, type='p')
+points(ds1$date, pred3, type='l')
+```
+Now get an estimate for the counterfactual (ie hold vaccine effect to 0 in the model)
+```{r}
+ds1.counterfactual<-ds1
+ds1.counterfactual$period1<-0
+ds1.counterfactual$period2<-0
+
+pred3.counter<-predict(mod3, type='response', newdata=ds1.counterfactual)
+
+```
+
+```{r}
+pred3<-predict(mod3, type='response')
+plot(ds1$date, ds1$J12_J18_prim, type='p')
+points(ds1$date, pred3, type='l')
+points(ds1$date, pred3.counter, type='l', col='red')
+title('Red=counterfactual')
+
+```
+Calculate a rate ratio from this model as the ratio of the fitted value and the counterfactual values. We won't try to estimate a confidence interval here. The InterventionEvaluatR package does this for us automatically.
+```{r}
+rr.its<-pred3/pred3.counter
+plot(ds1$date, rr.its, type='l',ylim=c(0.5,1.5), bty='l')
+abline(h=1, lty=1, col='gray')#add reference line
+title('Rate Ratio ITS model')
+```
+
+
+## Approach 2: Spline model
+In this case, we force the changes to be smooth so that we don't get the weird jumps like in the ITS example
+
+```{r}
+ds1$index<-1:nrow(ds1)
+intro.index<-which(ds1$date==vax.intro.date)
+eval.index<-which(ds1$date==vax.eval.date)
+
+ds1$spl1<-ds1$index - intro.index
+ds1$spl2<-ds1$index - eval.index
+ds1$spl1[ds1$spl1<0]<-0 
+ds1$spl2[ds1$spl2<0]<-0 
+
+ds1[,c('date','index','spl1','spl2')]
+```
+
+Ok, now let's fit our spline model and look at results 
+```{r}
+  mod4<-glm.nb(J12_J18_prim~index +month+ 
+                 index+ #trend pre-vaccine
+                 spl1+spl2+ #post-vaccine changes
+                 offset(log.offset) , data=ds1)
+summary(mod4)
+```
+
+Get fitted and counterfactual for the spline model 
+```{r}
+ pred.spline<-predict(mod4, type='response')
+
+ds1.counterfactual.spl<-ds1
+ds1.counterfactual.spl$spl1<-0
+ds1.counterfactual.spl$spl2<-0
+
+pred4.counter<-predict(mod4, type='response', newdata=ds1.counterfactual.spl)
+
+```
+
+```{r}
+plot(ds1$date, ds1$J12_J18_prim, type='p')
+points(ds1$date, pred.spline, type='l')
+points(ds1$date, pred4.counter, type='l', col='red')
+title('Red=counterfactual')
+
+```
+```{r}
+rr.spline<-pred.spline/pred4.counter
+plot(ds1$date, rr.spline, type='l',ylim=c(0.5,1.5), bty='l')
+abline(h=1, lty=1, col='gray')#add reference line
+title('Rate Ratio spline model')
+```
+
+## Approach #3: Fit to pre-vaccine period and extrapolate
+
+First set the pneumonia variable to NA during the post-vaccine period
+```{r}
+ds1$J12_J18_prim_pre <- ds1$J12_J18_prim
+ds1$J12_J18_prim_pre[which(ds1$date>=vax.intro.date)] <- NA
+ds1[,c('date','J12_J18_prim_pre' )]
+```
+```{r}
+mod5<- glm.nb(J12_J18_prim_pre~  index #time trend
+              +month #seasonality
+              +offset(log.offset), data=ds1)
+```
+
+```{r}
+pred.mod5<-predict(mod5,type='response', newdata=ds1)
+```
+
+Plot the observed and extrapolated data. Note that here the comparison is the *observed* data with the model estimate extrapolated from the pre-vaccine period. This is different form the previous models where we were just comparing the model fitted value with the model fitted value with the vaccine-effects held to 0.
+```{r}
+plot(ds1$date, ds1$J12_J18_prim, type='p')
+points(ds1$date, pred.mod5, type='l', col='red')
+
+points(ds1$date, pred.mod5, type='l', col='red')
+title('Red=counterfactual')
+
+```
+
+```{r}
+rr.trend<-ds1$J12_J18_prim/pred.mod5
+plot(ds1$date, rr.trend, type='l',ylim=c(0.5,1.5), bty='l')
+abline(h=1, lty=1, col='gray')#add reference line
+title('Rate Ratio trend model (model 3)')
+```
+##Let's compare the rate ratio estimates from the 3 models
+```{r}
+plot(rr.its, type='l', bty='l', ylim=c(0.5,1.5), col='blue', ylab='Rate Ratio')
+points(rr.trend, type='l', col='gray')
+points(rr.spline, type='l', col='red')
+abline(h=1, lty=2)
+```
+
+## look at rate ratio during the evaluation period
+As a rough estimate of this, let's just average the point-by-point estimates of the rate ratio during the evaluation period.
+
+```{r}
+eval.period<-ds1$date> vax.eval.date
+
+rr.its.eval<- mean(rr.its[eval.period])
+rr.spline.eval<- mean(rr.spline[eval.period])
+rr.trend.eval<- sum(ds1$J12_J18_prim[eval.period])/sum(pred.mod5[eval.period])
+
+c(rr.its.eval,rr.spline.eval,rr.trend.eval )
+```
+*Depending on the dataset, these 3 methods might or might not agree*
+
+
+
+
+
+
+
+
+
+
+
+
+
