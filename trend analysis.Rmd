@@ -18,7 +18,7 @@ We are going to analyze some data on pneumonia mortality from Latin America. The
 The data have already been formatted for your use. This is done using a procedure similar to what we did earlier in the semester when we were working with the data from Chile. 
 
 ```{r}
-ds1<-read.csv('./time series data/monthly_mortality_10_countries.csv')
+ds1<-read.csv('./Data/PAHO all age cuts_SubChapters.csv')
 
 #Guyana: use this one instead:
 #ds1<-read.csv('./time series data/quarterly_mortality_10_countries.csv')
@@ -104,7 +104,7 @@ points(ds1$date, pred1a, type='l')
 
 We might want to add an 'offset' variable that is used as a denominator. This could be population size; or all-non-respiratory causes of mortality 
 ```{r}
-ds1$log.offset<-log(ds1$acm_noj_nodiarr_prim)
+ds1$log.offset<-log(ds1$acm_noj_prim)
 ```
 
 refit the model with an offset and look at results
@@ -280,7 +280,7 @@ rr.its.eval<- mean(rr.its[eval.period])
 rr.spline.eval<- mean(rr.spline[eval.period])
 rr.trend.eval<- sum(ds1$J12_J18_prim[eval.period])/sum(pred.mod5[eval.period])
 
-c(rr.its.eval,rr.spline.eval,rr.trend.eval )
+c('ITS'=rr.its.eval,'Spline'=rr.spline.eval,'Trend Extrapolation'=rr.trend.eval )
 ```
 *Depending on the dataset, these 3 methods might or might not agree*
 
