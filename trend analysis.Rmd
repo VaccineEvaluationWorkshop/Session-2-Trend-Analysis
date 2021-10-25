@@ -8,6 +8,8 @@ output: html_notebook
 # Load libraries
 library(MASS)
 library(lubridate)
+library(ggplot2)
+library(gridExtra)
 ```
 
 ## Introduction
@@ -27,13 +29,15 @@ ds1<-read.csv('./Data/PAHO all age cuts_SubChapters.csv')
 subset the data to select which age groups we want and to remove the subnational data
 ```{r }
 ds1<-ds1[grep('A',ds1$age_group, fixed=T),] #Filter to national level data
+
 ds1<-ds1[grep('2-59m',ds1$age_group, fixed=T),] #select age group
+
 unique(ds1$age_group)
 ```
 
 ## Select country
 ```{r}
-ds1<-ds1[substr(ds1$age_group,1,2)=='ec',] #SELECT COUNTRY HERE
+ds1 <- ds1[substr(ds1$age_group,1,2)=='ec',] #SELECT COUNTRY HERE
 ```
 
 ## Specify dates of vaccine introduction
@@ -41,10 +45,11 @@ For all of these methods we need to know when the vaccine was introduced
 
 ```{r}
 ##CHANGE THIS DATE BASED ON YOUR COUNTRY
-vax.intro.date<-as.Date('2010-08-01') #when introduce vaccine?
-vax.eval.date<-as.Date('2011-08-01') #When start evaluation (usually at least 12 month after intro)
+vax.intro.date <- as.Date('2010-08-01') #when introduce vaccine?
+vax.eval.date <- as.Date('2011-08-01') #When start evaluation (usually at least 12 month after intro)
 
 ```
+
 ## Have a look at the data structure
 ```{r}
 str(ds1)
@@ -57,34 +62,68 @@ head(ds1)
 ## Make sure R recognizes 'date' as a dat format
 
 ```{r}
-ds1$date<-as.Date(ds1$monthdate, '%Y-%m-%d')
+ds1$date <- as.Date(ds1$monthdate, '%Y-%m-%d')
 ```
 
 
 ## Let's plot the time series
 ```{r, fig.width=8, fig.height=3}
-par(mfrow=c(1,2))
-plot(J12_J18_prim~date, data=ds1 ,type="l",col="blue",main="J12-18, <1 yo", bty='l', ylim=c(0,max(ds1$J12_J18_prim)))
 
-plot(acm_noj_prim~date, data=ds1 ,type="l",col="blue",main="All-cause hospitalization, <1 yo", bty='l',ylim=c(0,max(ds1$acm_noj_prim)))
+p1 <- ggplot(ds1, aes(x=date, y=J12_J18_prim)) +
+      geom_line() +
+      ylab("J12-18, <1 yo") +
+      xlab("Date") +
+      theme_classic() +
+      theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
+      geom_hline(yintercept=0, col='gray', lty=2) 
+   
+   
+p2 <- ggplot(ds1, aes(x=date, y=acm_noj_prim)) +
+      geom_line() +
+      ylab("All-cause hospitalization, <1 yo") +
+      xlab("Date") +
+      theme_classic() +
+      theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
+      geom_hline(yintercept=0, col='gray', lty=2)   
+
+grid.arrange(p1,p2, nrow=1)
+   
 ```
 
 ## Fitting a simple linear trend
 Here the X variable is time and the y variable is deaths due to J12-18
 ```{r, fig.width=4, fig.height=4}
-plot(J12_J18_prim~date, data=ds1 ,type="p",col="blue",main="J12-18, <1 yo", bty='l', ylim=c(0,max(ds1$J12_J18_prim)))
 
+p1 <- ggplot(ds1, aes(x=date, y=J12_J18_prim)) +
+      geom_point() +
+      ylab("J12-18, <1 yo") +
+      xlab("Date") +
+      theme_classic() +
+      theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
+      geom_hline(yintercept=0, col='gray', lty=2) 
+p1
 ```
 We will use negative binomial regression with these data. For *count* (number of deaths per month), we use either Poisson or negative binomial regression. We could use a Poisson regression, but often the data will be "overdispersed", and as a result, confidence intervals will be incorrectly tight. You can address this by using either as negative binomial regression, or a quassipoisson model, where you model the amount of unexplained variation
 ```{r}
    mod1<-glm.nb(J12_J18_prim~date , data=ds1)
    summary(mod1)
 ```
+
 extract the fitted values and plot them
-```{r}
-pred1<-predict(mod1, type='response')
-plot(ds1$date, ds1$J12_J18_prim, type='p')
-points(ds1$date, pred1, type='l')
+```{r, fig.width=4, fig.height=4}
+
+ds1.pred <- cbind.data.frame(ds1,'pred'=predict(mod1,type='response'))
+
+p1 <- ggplot(ds1, aes(x=date, y=J12_J18_prim)) +
+      geom_point() +
+      ylab("J12-18, <1 yo") +
+      xlab("Date") +
+      theme_classic() +
+      theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
+      geom_hline(yintercept=0, col='gray', lty=2) +
+      geom_line(color='#e41a1c', data=ds1.pred, aes(x=date, y=pred))
+   
+p1
 ```
 #Let's control for seasonality
 Use a monthly 'dummy' variable that allows each month to have a different average
@@ -96,10 +135,18 @@ fit updated model
 ```{r}
 mod1a<-glm.nb(J12_J18_prim~date +month, data=ds1)
 summary(mod1a)
+```
 
-pred1a<-predict(mod1a, type='response')
-plot(ds1$date, ds1$J12_J18_prim, type='p')
-points(ds1$date, pred1a, type='l')
+
+```{r}
+ds1.pred1 <- cbind.data.frame(ds1.pred,'pred2'=predict(mod1a,type='response')) #extract fitted value and add to ds1.pred
+
+p2 <- p1 +
+      geom_line(color='#377eb8', data=ds1.pred1, aes(x=date, y=pred2))
+
+p2
+
+
 ```
 
 We might want to add an 'offset' variable that is used as a denominator. This could be population size; or all-non-respiratory causes of mortality 
@@ -111,9 +158,16 @@ refit the model with an offset and look at results
 ```{r}
   mod2<-glm.nb(J12_J18_prim~date +month+ offset(log.offset) , data=ds1)
    summary(mod2)
-pred2<-predict(mod2, type='response')
-plot(ds1$date, ds1$J12_J18_prim, type='p')
-points(ds1$date, pred2, type='l')
+```
+
+```{r}
+
+ds1.pred2 <- cbind.data.frame(ds1.pred,'pred3'=predict(mod2,type='response')) #extract fitted value and add to ds1.pred
+
+p3 <- p2+
+      geom_line(color='#4daf4a', data=ds1.pred2, aes(x=date, y=pred3))
+
+p3
 
 ```
 ## Now lets test if the trend or level of disease changes 
@@ -146,34 +200,49 @@ summary(mod3)
 ```
 
 ```{r}
-pred3<-predict(mod3, type='response')
-plot(ds1$date, ds1$J12_J18_prim, type='p')
-points(ds1$date, pred3, type='l')
+ds.pred.its <- cbind.data.frame(ds1,'pred4'=predict(mod3,type='response')) #extract fitted value and add to ds1.pred
+
+p4 <- ggplot(ds.pred.its, aes(x=date, y=J12_J18_prim)) +
+      geom_point() +
+      ylab("J12-18, <1 yo") +
+      xlab("Date") +
+      theme_classic() +
+      theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
+      geom_hline(yintercept=0, col='gray', lty=2) +
+      geom_line(color='#377eb8', data=ds.pred.its, aes(x=date, y=pred4))
+p4   
 ```
+
+
 Now get an estimate for the counterfactual (ie hold vaccine effect to 0 in the model)
 ```{r}
 ds1.counterfactual<-ds1
 ds1.counterfactual$period1<-0
 ds1.counterfactual$period2<-0
 
-pred3.counter<-predict(mod3, type='response', newdata=ds1.counterfactual)
+ds.pred.its$pred4.cf <- predict(mod3,type='response',newdata=ds1.counterfactual) #extract fitted value and add to ds1.pred
+
+p4 +
+ geom_line(color='#e41a1c', lty=2,data=ds.pred.its, aes(x=date, y=pred4.cf))
+
 
 ```
 
-```{r}
-pred3<-predict(mod3, type='response')
-plot(ds1$date, ds1$J12_J18_prim, type='p')
-points(ds1$date, pred3, type='l')
-points(ds1$date, pred3.counter, type='l', col='red')
-title('Red=counterfactual')
 
-```
 Calculate a rate ratio from this model as the ratio of the fitted value and the counterfactual values. We won't try to estimate a confidence interval here. The InterventionEvaluatR package does this for us automatically.
 ```{r}
-rr.its<-pred3/pred3.counter
-plot(ds1$date, rr.its, type='l',ylim=c(0.5,1.5), bty='l')
-abline(h=1, lty=1, col='gray')#add reference line
-title('Rate Ratio ITS model')
+ds.pred.its$rr.its <- ds.pred.its$pred4/ds.pred.its$pred4.cf
+
+p6<- ggplot(ds.pred.its, aes(x=date, y=rr.its)) +
+      geom_line() +
+      ylab("Rate ratio") +
+      xlab("Date") +
+       labs(title='Rate Ratio ITS model')+
+      theme_classic() +
+      theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
+      geom_hline(yintercept=1, col='gray', lty=2) 
+
+p6
 ```
 
 
@@ -204,28 +273,44 @@ summary(mod4)
 
 Get fitted and counterfactual for the spline model 
 ```{r}
- pred.spline<-predict(mod4, type='response')
+ ds.pred.spl<-cbind.data.frame( ds1,'pred.spl'=predict(mod4, type='response') )
 
 ds1.counterfactual.spl<-ds1
 ds1.counterfactual.spl$spl1<-0
 ds1.counterfactual.spl$spl2<-0
 
-pred4.counter<-predict(mod4, type='response', newdata=ds1.counterfactual.spl)
+ds.pred.spl$pred.spl.cf <-predict(mod4, type='response', newdata=ds1.counterfactual.spl)
 
 ```
 
+The red is counterfactual, blue is fitted
 ```{r}
-plot(ds1$date, ds1$J12_J18_prim, type='p')
-points(ds1$date, pred.spline, type='l')
-points(ds1$date, pred4.counter, type='l', col='red')
-title('Red=counterfactual')
+
+p7 <- ggplot(ds.pred.spl, aes(x=date, y=J12_J18_prim)) +
+      geom_point() +
+      ylab("J12-18, <1 yo") +
+      xlab("Date") +
+      theme_classic() +
+      theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
+      geom_hline(yintercept=0, col='gray', lty=2) +
+      geom_line(color='#377eb8', data=ds.pred.spl, aes(x=date, y=pred.spl)) +
+       geom_line(color='#e41a1c', lty=2,data=ds.pred.spl, aes(x=date, y=pred.spl.cf))
+p7
 
 ```
+
+
+
 ```{r}
-rr.spline<-pred.spline/pred4.counter
-plot(ds1$date, rr.spline, type='l',ylim=c(0.5,1.5), bty='l')
-abline(h=1, lty=1, col='gray')#add reference line
-title('Rate Ratio spline model')
+ds.pred.spl$rr.spline <- ds.pred.spl$pred.spl/ds.pred.spl$pred.spl.cf
+
+p8 <- p6 +
+     geom_line(color='red', lty=2,data=ds.pred.spl, aes(x=date, y=rr.spline))
+   
+p8
+
+
+
 ```
 
 ## Approach #3: Fit to pre-vaccine period and extrapolate
@@ -236,6 +321,8 @@ ds1$J12_J18_prim_pre <- ds1$J12_J18_prim
 ds1$J12_J18_prim_pre[which(ds1$date>=vax.intro.date)] <- NA
 ds1[,c('date','J12_J18_prim_pre' )]
 ```
+
+
 ```{r}
 mod5<- glm.nb(J12_J18_prim_pre~  index #time trend
               +month #seasonality
@@ -243,32 +330,37 @@ mod5<- glm.nb(J12_J18_prim_pre~  index #time trend
 ```
 
 ```{r}
-pred.mod5<-predict(mod5,type='response', newdata=ds1)
+ds.pred.mod5<-cbind.data.frame(ds1, 'pred.mod5'=predict(mod5,type='response', newdata=ds1))
 ```
 
 Plot the observed and extrapolated data. Note that here the comparison is the *observed* data with the model estimate extrapolated from the pre-vaccine period. This is different form the previous models where we were just comparing the model fitted value with the model fitted value with the vaccine-effects held to 0.
 ```{r}
-plot(ds1$date, ds1$J12_J18_prim, type='p')
-points(ds1$date, pred.mod5, type='l', col='red')
-
-points(ds1$date, pred.mod5, type='l', col='red')
-title('Red=counterfactual')
+p9 <- ggplot(ds.pred.mod5, aes(x=date, y=J12_J18_prim)) +
+      geom_point() +
+      ylab("J12-18, <1 yo") +
+      xlab("Date") +
+      theme_classic() +
+      theme(panel.spacing= unit(2,'lines') , axis.text.x=element_text(angle=90)) +
+      geom_hline(yintercept=0, col='gray', lty=2) +
+      geom_line(color='#377eb8', data=ds.pred.mod5, aes(x=date, y=pred.mod5)) 
+p9
 
 ```
 
 ```{r}
-rr.trend<-ds1$J12_J18_prim/pred.mod5
-plot(ds1$date, rr.trend, type='l',ylim=c(0.5,1.5), bty='l')
-abline(h=1, lty=1, col='gray')#add reference line
-title('Rate Ratio trend model (model 3)')
+ds.pred.mod5$rr.trend<-ds1$J12_J18_prim/ds.pred.mod5$pred.mod5
+
 ```
+
 ##Let's compare the rate ratio estimates from the 3 models
+
 ```{r}
-plot(rr.its, type='l', bty='l', ylim=c(0.5,1.5), col='blue', ylab='Rate Ratio')
-points(rr.trend, type='l', col='gray')
-points(rr.spline, type='l', col='red')
-abline(h=1, lty=2)
+p8 +  geom_line(color='#377eb8',lwd=1, lty=1,data=ds.pred.mod5, aes(x=date, y=rr.trend))
+
 ```
+
+
+
 
 ## look at rate ratio during the evaluation period
 As a rough estimate of this, let's just average the point-by-point estimates of the rate ratio during the evaluation period.
@@ -276,12 +368,13 @@ As a rough estimate of this, let's just average the point-by-point estimates of 
 ```{r}
 eval.period<-ds1$date> vax.eval.date
 
-rr.its.eval<- mean(rr.its[eval.period])
-rr.spline.eval<- mean(rr.spline[eval.period])
-rr.trend.eval<- sum(ds1$J12_J18_prim[eval.period])/sum(pred.mod5[eval.period])
+rr.its.eval<- mean(ds.pred.its$rr.its[eval.period])
+rr.spline.eval<- mean(ds.pred.spl$rr.spline[eval.period])
+rr.trend.eval<- sum(ds.pred.mod5$J12_J18_prim[eval.period])/sum(ds.pred.mod5$pred.mod5[eval.period])
 
 c('ITS'=rr.its.eval,'Spline'=rr.spline.eval,'Trend Extrapolation'=rr.trend.eval )
 ```
+
 *Depending on the dataset, these 3 methods might or might not agree*
 
 
