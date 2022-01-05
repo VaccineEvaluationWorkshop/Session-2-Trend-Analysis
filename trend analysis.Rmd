@@ -1,6 +1,6 @@
 ---
 title: "Evaluating impact with ITS"
-output: html_notebook
+output: html_document
 ---
 
 
@@ -11,20 +11,31 @@ library(lubridate)
 ```
 
 ## Introduction
-We are going to analyze some data on pneumonia mortality from Latin America. These data were drawn from the national mortality registers that we learned about earlier and were formatted into time series in a similar method to what you did previously. 
+
+We are going to analyze some data on pneumonia mortality from Latin America. These data were drawn from the national mortality registries that we learned about earlier and were formatted into time series in a similar method to what you did previously. The data here are described in an evaluation of the impact of pneumococcal conjugate vaccines in 10 countries in Latin America and the Caribbean https://pubmed.ncbi.nlm.nih.gov/32448889/. The original study was led by PAHO, with a collaborative network representing 10 countries in the region, along with data analysis support from Yale School of Public Health. 
 
 
 ## Read in the time series data
-The data have already been formatted for your use. This is done using a procedure similar to what we did earlier in the semester when we were working with the data from Chile. 
+The data have already been formatted for your use. The process for doing this is similar to what was done in the data wrangling session
 
 ```{r}
 ds1<-read.csv('./Data/PAHO all age cuts_SubChapters.csv')
 
-#Guyana: use this one instead:
-#ds1<-read.csv('./time series data/quarterly_mortality_10_countries.csv')
+```
+
+View the dataset
+
+```{r}
+head(ds1)
+```
+
+Have a look at the data structure
+```{r}
+str(ds1)
 ```
 
 subset the data to select which age groups we want and to remove the subnational data
+
 ```{r }
 ds1<-ds1[grep('A',ds1$age_group, fixed=T),] #Filter to national level data
 ds1<-ds1[grep('2-59m',ds1$age_group, fixed=T),] #select age group
@@ -32,6 +43,17 @@ unique(ds1$age_group)
 ```
 
 ## Select country
+ar=Argentina
+br=Brazil
+co=Colombia
+dr=Dominican Republic
+ec=Ecuador
+gy=Guyana
+hr=Honduras
+mx=Mexico
+nc=Nicaragua
+pr=Peru
+
 ```{r}
 ds1<-ds1[substr(ds1$age_group,1,2)=='ec',] #SELECT COUNTRY HERE
 ```
@@ -41,18 +63,11 @@ For all of these methods we need to know when the vaccine was introduced
 
 ```{r}
 ##CHANGE THIS DATE BASED ON YOUR COUNTRY
-vax.intro.date<-as.Date('2010-08-01') #when introduce vaccine?
-vax.eval.date<-as.Date('2011-08-01') #When start evaluation (usually at least 12 month after intro)
+vax.intro.date <- as.Date('2010-08-01') #when introduce vaccine?
+vax.eval.date <- as.Date('2011-08-01') #When start evaluation (usually at least 12 month after intro)
 
 ```
-## Have a look at the data structure
-```{r}
-str(ds1)
-```
 
-```{r}
-head(ds1)
-```
 
 ## Make sure R recognizes 'date' as a dat format
 
@@ -70,7 +85,9 @@ plot(acm_noj_prim~date, data=ds1 ,type="l",col="blue",main="All-cause hospitaliz
 ```
 
 ## Fitting a simple linear trend
+
 Here the X variable is time and the y variable is deaths due to J12-18
+
 ```{r, fig.width=4, fig.height=4}
 plot(J12_J18_prim~date, data=ds1 ,type="p",col="blue",main="J12-18, <1 yo", bty='l', ylim=c(0,max(ds1$J12_J18_prim)))
 
