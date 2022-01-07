@@ -1,6 +1,8 @@
 ---
 title: "Evaluating impact with ITS"
-output: html_document
+output:
+  pdf_document: default
+  html_document: default
 ---
 
 
@@ -41,7 +43,7 @@ subset the data to select which age groups we want and to remove the subnational
 ```{r }
 ds1<-ds1[grep('A',ds1$age_group, fixed=T),] #Filter to national level data
 
-ds1<-ds1[grep('2-59m',ds1$age_group, fixed=T),] #select age group
+ds1<-ds1[grep('2-11m',ds1$age_group, fixed=T),] #select age group
 
 unique(ds1$age_group)
 ```
@@ -100,7 +102,7 @@ plot.fun <- function(ds=ds1,xvar='date', yvar, ylab,plot.type='line'){
 #call the function
 p1 <- plot.fun(yvar='J12_J18_prim', ylab="J12-18, <1 yo")
 
-p2 <- plot.fun(yvar='acm_noj_prim', ylab="All-cause hospitalization, <1 yo")
+p2 <- plot.fun(yvar='acm_noj_prim', ylab="All-cause Mortality, <1 yo")
 
 grid.arrange(p1,p2, nrow=1) #arranges the plots
    
@@ -119,7 +121,10 @@ p3
 We will use negative binomial regression with these data. For *count* (number of deaths per month), we use either Poisson or negative binomial regression. We could use a Poisson regression, but often the data will be "overdispersed", and as a result, confidence intervals will be incorrectly tight. You can address this by using either as negative binomial regression, or a quassipoisson model, where you model the amount of unexplained variation
 
 ```{r}
-   mod1<-glm.nb(J12_J18_prim ~ date , data=ds1)
+   # mod1a <- glm(J12_J18_prim ~ date , data=ds1, family= 'poisson')
+   # summary(mod1a)
+
+   mod1 <- glm.nb(J12_J18_prim ~ date , data=ds1)
    summary(mod1)
 ```
 
@@ -144,7 +149,7 @@ ds1$month[1:36] #print first 36 observations
 
 fit updated model
 ```{r}
-mod1a<-glm.nb(J12_J18_prim~date +month, data=ds1)
+mod1a<-glm.nb(J12_J18_prim~date + month, data=ds1)
 summary(mod1a)
 ```
 
@@ -163,12 +168,25 @@ p5
 We might want to add an 'offset' variable that is used as a denominator. This could be population size; or all-non-respiratory causes of mortality 
 
 ```{r}
-ds1$log.offset<-log(ds1$acm_noj_prim)
+ds1$log.offset <- log(ds1$acm_noj_prim)
 ```
 
 refit the model with an offset and look at results
+
+N_deaths ~ Poisson ( lambda)
+
+log(lambda) = b0 + b1* date + b2*month1 +b3*month2...
+
+log(lambda/offset) = b0 + b1*date...
+
+log(lambda) -log(offset) = b0 + b1*date
+
+log(lambda) = b0 = b1*date + log(offset)
+
+
 ```{r}
-  mod2<-glm.nb(J12_J18_prim~date +month+ offset(log.offset) , data=ds1)
+  mod2<-glm.nb(J12_J18_prim~date +month + offset(log.offset) , data=ds1)
+
    summary(mod2)
 ```
 
@@ -192,23 +210,31 @@ There are 3 ways we can do this.
 ## Method 1. Interrupted time series
 First create 'dummy variables' that are 0 before introduction and 1 during the 
 ```{r}
-ds1$period1<-0
-ds1$period2<-0
+ds1$period1 <- 0
+ds1$period2 <- 0
 
 ds1$period1[ds1$date>=vax.intro.date] <- 1
 ds1$period2[ds1$date>=vax.eval.date] <- 1
 
 ds1$index<-1:nrow(ds1)
+
 ds1[,c('date','index','period1','period2')]
 ```
 
 Ok, now let's fit our ITS model and look at results 
 ```{r}
-  mod3<-glm.nb(J12_J18_prim~index +month+ 
+  mod3<-glm.nb(J12_J18_prim~ index + month+ 
                  period1 +period1*index +
                  period2 +period2*index+ #change in disease during evaluation period
                  offset(log.offset) , data=ds1)
 summary(mod3)
+
+
+# mod3b<-glm.nb(J12_J18_prim~ index + month+ 
+#                  period1 +
+#                  period2 + #change in disease during evaluation period
+#                  offset(log.offset) , data=ds1)
+# summary(mod3b)
 ```
 
 ```{r}
@@ -217,14 +243,15 @@ ds.pred.its <- cbind.data.frame(ds1,'pred4'=predict(mod3,type='response')) #extr
 p7 <- p3+
       geom_line(color='#377eb8', data=ds.pred.its, aes(x=date, y=pred4))
    
+p7
 ```
 
 
 Now get an estimate for the counterfactual (ie hold vaccine effect to 0 in the model)
 ```{r}
 ds1.counterfactual<-ds1
-ds1.counterfactual$period1<-0
-ds1.counterfactual$period2<-0
+ds1.counterfactual$period1 <- 0
+ds1.counterfactual$period2 <- 0
 
 ds.pred.its$pred4.cf <- predict(mod3,type='response',newdata=ds1.counterfactual) #extract fitted value and add to ds1.pred
 
@@ -253,11 +280,13 @@ In this case, we force the changes to be smooth so that we don't get the weird j
 
 ```{r}
 ds1$index<-1:nrow(ds1)
+
 intro.index<-which(ds1$date==vax.intro.date)
 eval.index<-which(ds1$date==vax.eval.date)
 
 ds1$spl1<- ds1$index - intro.index
 ds1$spl2<- ds1$index - eval.index
+
 ds1$spl1[ds1$spl1<0]<-0 
 ds1$spl2[ds1$spl2<0]<-0 
 
@@ -266,7 +295,7 @@ ds1[,c('date','index','spl1','spl2')]
 
 Ok, now let's fit our spline model and look at results 
 ```{r}
-  mod4<-glm.nb(J12_J18_prim~index +month+ 
+  mod4<-glm.nb(J12_J18_prim~ month+ 
                  index+ #trend pre-vaccine
                  spl1+spl2+ #post-vaccine changes
                  offset(log.offset) , data=ds1)
